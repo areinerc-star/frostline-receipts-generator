@@ -504,6 +504,32 @@
     flex:1; min-width:140px;
   }
 
+  /* ---------- receipt log ---------- */
+  .logcard{padding:0;}
+  .logtable{width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:12px;}
+  .logtable thead th{
+    text-align:left; padding:12px 16px;
+    font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);
+    border-bottom:1px solid var(--line);
+    white-space:nowrap;
+  }
+  .logtable tbody td{
+    padding:11px 16px;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+    color:var(--frost-dim);
+    white-space:nowrap;
+  }
+  .logtable tbody tr:hover{background:rgba(255,255,255,0.04);}
+  .logtable td.num{color:var(--frost); text-align:right;}
+  .logtable td.due{color:var(--warm);}
+  .logempty{padding:36px 20px; text-align:center; color:var(--steel); font-family:'JetBrains Mono',monospace; font-size:12px;}
+  .logfoot{
+    display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    padding:14px 20px; border-top:1px solid var(--line);
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--steel);
+  }
+  .logfoot b{color:var(--ice); font-size:13px;}
+
   footer{
     max-width:1400px; margin:0 auto; padding:0 clamp(16px,4vw,56px) 40px;
     font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--steel);
@@ -673,6 +699,26 @@
   </div>
 </main>
 
+<div class="frostline dim"></div>
+
+<main style="padding-top:26px; display:block;">
+  <div class="panel logcard">
+    <div class="panel-head">
+      <h2>Receipt Log</h2>
+      <span class="idx" id="logCountIdx">0 entries — in-memory only</span>
+    </div>
+    <div id="logWrap">
+      <div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>
+    </div>
+    <div class="logfoot">
+      <span>Entries: <b id="lfCount">0</b></span>
+      <span>Total received: <b id="lfPaid">₱0.00</b></span>
+      <span>Total outstanding: <b id="lfDue">₱0.00</b></span>
+      <span>Total contract value: <b id="lfTotal">₱0.00</b></span>
+    </div>
+  </div>
+</main>
+
 <footer>
   <span>FROSTLINE / Receipt &amp; Expense Generator</span>
   <span id="clockLine">—</span>
@@ -688,6 +734,7 @@
   let currentType = 'downpayment';
   let docCategory = 'receipt';
   let counter = 1;
+  let receiptLog = [];
   let dpNextId = 3;
   let dpItems = [
     { id: 1, name: '', price: 0, qty: 0 },
@@ -907,9 +954,59 @@
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
   });
 
+  function renderLog(){
+    $('logCountIdx').textContent = receiptLog.length + (receiptLog.length === 1 ? ' entry — in-memory only' : ' entries — in-memory only');
+    if(receiptLog.length === 0){
+      $('logWrap').innerHTML = '<div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>';
+    } else {
+      const rows = receiptLog.slice().reverse().map(e => `
+        <tr>
+          <td>${e.no}</td>
+          <td>${e.docCategory}</td>
+          <td>${e.type}</td>
+          <td>${e.name}</td>
+          <td>${e.date}</td>
+          <td class="num">${fmt(e.total)}</td>
+          <td class="num">${fmt(e.paid)}</td>
+          <td class="num due">${fmt(e.bal)}</td>
+        </tr>`).join('');
+      $('logWrap').innerHTML = `
+        <table class="logtable">
+          <thead><tr>
+            <th>No.</th><th>Doc</th><th>Type</th><th>Customer</th><th>Date</th>
+            <th>Total</th><th>Paid</th><th>Balance</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+    const sumTotal = receiptLog.reduce((s,e)=>s+e.total,0);
+    const sumPaid = receiptLog.reduce((s,e)=>s+e.paid,0);
+    const sumDue = receiptLog.reduce((s,e)=>s+e.bal,0);
+    $('lfCount').textContent = receiptLog.length;
+    $('lfTotal').textContent = fmt(sumTotal);
+    $('lfPaid').textContent = fmt(sumPaid);
+    $('lfDue').textContent = fmt(sumDue);
+  }
+
   $('rform').addEventListener('submit', function(e){
     e.preventDefault();
     updatePreview();
+    const { grandTotal, dpAmount, isFull } = computeDpTotals();
+    const bal = isFull ? 0 : Math.max(grandTotal - dpAmount, 0);
+    receiptLog.push({
+      no: $('rNo').textContent,
+      docCategory: docCategory === 'invoice' ? 'Invoice' : 'Receipt',
+      type: currentType === 'full' ? 'Full Payment' : 'Downpayment',
+      name: $('fName').value.trim() || '—',
+      date: $('rDate').textContent,
+      total: grandTotal,
+      paid: dpAmount,
+      bal: bal
+    });
+    counter += 1;
+    refreshNextNo();
+    updatePreview();
+    renderLog();
   });
 
   $('clearForm').addEventListener('click', function(){
@@ -1021,6 +1118,7 @@
   $('fDate').value = todayStr();
   renderDpItemsForm();
   setType('downpayment');
+  renderLog();
 })();
 </script>
 
