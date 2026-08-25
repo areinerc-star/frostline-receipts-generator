@@ -1074,20 +1074,66 @@
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
   });
 
+  let remoteLogConnected = null; // null = unknown yet, true/false once we know
+
+  async function loadRemoteLog(){
+    try{
+      const res = await fetch('/api/log');
+      if(!res.ok){ remoteLogConnected = false; renderLog(); return; }
+      const remote = await res.json();
+      remoteLogConnected = true;
+      if(Array.isArray(remote)){
+        // API returns newest-first; we keep receiptLog oldest-first internally.
+        receiptLog = remote.slice().reverse().map(e => ({ ...e, proof: null, hasProof: !!e.hasProof }));
+      }
+    } catch(err){
+      remoteLogConnected = false; // no backend yet (e.g. Upstash not connected), stay local-only
+    }
+    renderLog();
+  }
+
+  function syncLogEntry(entry){
+    // Send a lightweight copy — never the embedded image data — to keep the
+    // shared log small and fast regardless of how many receipts have proofs.
+    const payload = {
+      no: entry.no, docCategory: entry.docCategory, type: entry.type,
+      name: entry.name, date: entry.date,
+      total: entry.total, paid: entry.paid, bal: entry.bal,
+      hasProof: !!entry.proof
+    };
+    fetch('/api/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(res => { remoteLogConnected = res.ok; renderLog(); })
+      .catch(() => { remoteLogConnected = false; renderLog(); });
+  }
+
   function renderLog(){
-    $('logCountIdx').textContent = receiptLog.length + (receiptLog.length === 1 ? ' entry — in-memory only' : ' entries — in-memory only');
+    const statusLabel = remoteLogConnected === true ? 'synced'
+      : remoteLogConnected === false ? 'local only — backend not connected'
+      : 'in-memory only';
+    $('logCountIdx').textContent = receiptLog.length + (receiptLog.length === 1 ? ' entry — ' : ' entries — ') + statusLabel;
     if(receiptLog.length === 0){
       $('logWrap').innerHTML = '<div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>';
     } else {
-      const rows = receiptLog.map((e, idx) => ({ e, idx })).slice().reverse().map(({ e, idx }) => `
+      const rows = receiptLog.map((e, idx) => ({ e, idx })).slice().reverse().map(({ e, idx }) => {
+        let proofCell = '—';
+        if(e.proof){
+          proofCell = `<button type="button" class="log-proof-btn" data-log-idx="${idx}">View</button>`;
+        } else if(e.hasProof){
+          proofCell = '<span title="Attached on another device — not available here">📎</span>';
+        }
+        return `
         <tr>
           <td>${e.no}</td>
           <td>${e.name}</td>
           <td>${e.date}</td>
           <td class="num">${fmt(e.total)}</td>
           <td class="num due">${fmt(e.bal)}</td>
-          <td>${e.proof ? `<button type="button" class="log-proof-btn" data-log-idx="${idx}">View</button>` : '—'}</td>
-        </tr>`).join('');
+          <td>${proofCell}</td>
+        </tr>`;
+      }).join('');
       $('logWrap').innerHTML = `
         <table class="logtable">
           <thead><tr>
@@ -1154,7 +1200,7 @@
     updatePreview();
     const { grandTotal, dpAmount, isFull } = computeDpTotals();
     const bal = isFull ? 0 : Math.max(grandTotal - dpAmount, 0);
-    receiptLog.push({
+    const entry = {
       no: $('rNo').textContent,
       docCategory: docCategory === 'invoice' ? 'Invoice' : 'Receipt',
       type: currentType === 'full' ? 'Full Payment' : 'Downpayment',
@@ -1164,11 +1210,13 @@
       paid: dpAmount,
       bal: bal,
       proof: proofData ? { dataUrl: proofData.dataUrl, isImage: proofData.isImage, name: proofData.name } : null
-    });
+    };
+    receiptLog.push(entry);
     counter += 1;
     refreshNextNo();
     updatePreview();
     renderLog();
+    syncLogEntry(entry);
   });
 
   $('clearForm').addEventListener('click', function(){
@@ -1272,7 +1320,7 @@
   $('fDate').value = todayStr();
   renderDpItemsForm();
   setType('downpayment');
-  renderLog();
+  loadRemoteLog();
 })();
 </script>
 
