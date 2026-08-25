@@ -263,6 +263,22 @@
     font-size:14px;
   }
   .dpitem-remove:hover{border-color:var(--frost); color:var(--frost);}
+
+  .prevdp-row{
+    display:grid;
+    grid-template-columns:1fr 100px 24px;
+    gap:6px;
+    align-items:center;
+    margin-bottom:8px;
+  }
+  .prevdp-row input{
+    padding:8px 9px;
+    font-size:12.5px;
+  }
+  .prevdp-row input.prevdp-amount{
+    font-family:'JetBrains Mono',monospace;
+    text-align:right;
+  }
   .dpitem-addbtn{
     background:transparent;
     border:1px dashed var(--line);
@@ -621,6 +637,12 @@
           <input type="number" id="fDpPct" value="50" min="0" max="100" step="1">
           <span id="dpSummary">Grand total ₱0.00 — DP ₱0.00</span>
         </div>
+
+        <div id="prevDpSection" style="display:none;">
+          <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel); margin-bottom:7px;">Previous Downpayment Records (optional)</label>
+          <div id="prevDpList"></div>
+          <button type="button" class="dpitem-addbtn" id="prevDpAddBtn">+ Add downpayment record</button>
+        </div>
       </div>
 
       <div class="field" id="paymentMethodField">
@@ -758,6 +780,8 @@
     { id: 1, name: '', price: 0, qty: 0 },
     { id: 2, name: '', price: 0, qty: 0 }
   ];
+  let prevDpNextId = 1;
+  let prevDpRecords = [];
 
   const MOCKUP_FEE = 560;
 
@@ -771,7 +795,28 @@
     const fee = feeApplies ? MOCKUP_FEE : 0;
     const grandTotal = itemsTotal + fee;
     const dpAmount = isFull ? grandTotal : grandTotal * (pct/100);
-    return { items, itemsTotal, totalQty, feeApplies, fee, grandTotal, dpAmount, dpPct: pct, isFull };
+    const prevDpList = isFull
+      ? prevDpRecords
+          .map(r => ({
+            amount: parseFloat(r.amount) || 0,
+            dateVal: r.date || '',
+            date: r.date ? new Date(r.date+'T00:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}) : ''
+          }))
+          .filter(r => r.amount > 0)
+      : [];
+    const prevDpAmount = prevDpList.reduce((s,r)=> s + r.amount, 0);
+    const hasPrevDp = isFull && prevDpAmount > 0;
+    const finalPaymentAmount = hasPrevDp ? Math.max(grandTotal - prevDpAmount, 0) : dpAmount;
+    return { items, itemsTotal, totalQty, feeApplies, fee, grandTotal, dpAmount, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount };
+  }
+
+  function renderPrevDpForm(){
+    $('prevDpList').innerHTML = prevDpRecords.map(r => `
+      <div class="prevdp-row">
+        <input type="date" class="prevdp-date" data-field="date" data-id="${r.id}" value="${r.date || ''}">
+        <input type="number" class="prevdp-amount" data-field="amount" data-id="${r.id}" placeholder="0.00" step="0.01" min="0" value="${r.amount || ''}">
+        <button type="button" class="dpitem-remove" data-prevdp-remove="${r.id}" title="Remove record">&times;</button>
+      </div>`).join('');
   }
 
   function renderDpItemsForm(){
@@ -785,7 +830,7 @@
   }
 
   function renderDpTablePreview(){
-    const { items, itemsTotal, feeApplies, fee, grandTotal, dpAmount, dpPct, totalQty, isFull } = computeDpTotals();
+    const { items, itemsTotal, feeApplies, fee, grandTotal, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount } = computeDpTotals();
     const activeItems = items.filter(it => it.name || it.price || it.qty);
     const list = activeItems.length ? activeItems : items;
     const balance = Math.max(grandTotal - dpAmount, 0);
@@ -793,7 +838,7 @@
     const itemLines = list.map(it => {
       const label = it.name || 'Item';
       const lineTotal = (it.price||0) * (it.qty||0);
-      return `<div class="dp-item-line"><span class="lbl">${label}</span><span class="val">${it.qty||0} &times; ${fmt(it.price||0)} = ${fmt(lineTotal)}</span></div>`;
+      return `<div class="dp-item-line"><span class="lbl">${label}${it.qty ? ' (' + it.qty + 'x)' : ''}</span><span class="val">${fmt(lineTotal)}</span></div>`;
     }).join('');
 
     const feeLine = feeApplies
@@ -812,9 +857,15 @@
       : `<div class="aline due"><span>Balance — Unpaid</span><span class="val">${fmt(balance)}</span></div>
          <div class="dp-due-note">Payable upon completion, before release of customized item(s).</div>`;
 
+    const breakdownBlock = (isFull && hasPrevDp)
+      ? prevDpList.map((r, i) => `<div class="aline"><span>Downpayment ${prevDpList.length > 1 ? (i+1) + ' ' : ''}Paid${r.date ? ' (' + r.date + ')' : ''}</span><span class="val">${fmt(r.amount)}</span></div>`).join('')
+        + `<div class="aline"><span>Final Payment${docCategory === 'invoice' ? ' (Due)' : ' Received'}</span><span class="val">${fmt(finalPaymentAmount)}</span></div>`
+      : '';
+
     $('dpTablePreview').innerHTML = `
       <div class="dp-lines">${itemLines}${feeLine}</div>
       <div class="aline"><span>Grand total</span><span class="val">${fmt(grandTotal)}</span></div>
+      ${breakdownBlock}
       <div class="aline total"><span>${paidLineLabel}</span><span class="val">${fmt(dpAmount)}</span></div>
       ${balanceBlock}`;
 
@@ -867,6 +918,8 @@
     updateFieldVisibility();
 
     $('dpPctRow').style.display = type === 'downpayment' ? '' : 'none';
+    $('prevDpSection').style.display = type === 'full' ? '' : 'none';
+    if(type === 'full') renderPrevDpForm();
 
     refreshNextNo();
     updatePreview();
@@ -913,6 +966,32 @@
   $('fDpPct').addEventListener('input', updatePreview);
   $('fMockupFee').addEventListener('change', updatePreview);
 
+  $('prevDpAddBtn').addEventListener('click', function(){
+    prevDpRecords.push({ id: prevDpNextId++, date: '', amount: 0 });
+    renderPrevDpForm();
+    updatePreview();
+  });
+
+  $('prevDpList').addEventListener('input', function(e){
+    const t = e.target;
+    if(!t.dataset || !t.dataset.field) return;
+    const id = Number(t.dataset.id);
+    const record = prevDpRecords.find(r => r.id === id);
+    if(!record) return;
+    if(t.dataset.field === 'date') record.date = t.value;
+    else record[t.dataset.field] = parseFloat(t.value) || 0;
+    updatePreview();
+  });
+
+  $('prevDpList').addEventListener('click', function(e){
+    const removeId = e.target.dataset ? e.target.dataset.prevdpRemove : null;
+    if(!removeId) return;
+    const id = Number(removeId);
+    prevDpRecords = prevDpRecords.filter(r => r.id !== id);
+    renderPrevDpForm();
+    updatePreview();
+  });
+
   $('dpItemsList').addEventListener('input', function(e){
     const t = e.target;
     if(!t.dataset || !t.dataset.field) return;
@@ -948,7 +1027,7 @@
     lines.push($('rNameLbl').textContent + ': ' + $('rName').textContent);
     lines.push('Method: ' + $('rMethod').textContent);
     lines.push('');
-    const { items, feeApplies, fee, grandTotal, dpAmount, dpPct, isFull } = computeDpTotals();
+    const { items, feeApplies, fee, grandTotal, dpAmount, dpPct, isFull, hasPrevDp, prevDpList, finalPaymentAmount } = computeDpTotals();
     items.forEach(it=>{
       if(!it.name && !it.price && !it.qty) return;
       lines.push(`${it.name || 'Item'} — ${it.qty} pc(s) x ${fmt(it.price)} = ${fmt(it.price*it.qty)}`);
@@ -958,6 +1037,12 @@
     }
     lines.push('');
     lines.push('Grand Total: ' + fmt(grandTotal));
+    if(isFull && hasPrevDp){
+      prevDpList.forEach((r, i) => {
+        lines.push(`Downpayment ${prevDpList.length > 1 ? (i+1) + ' ' : ''}Paid${r.date ? ' (' + r.date + ')' : ''}: ` + fmt(r.amount));
+      });
+      lines.push(`Final Payment${docCategory === 'invoice' ? ' (Due)' : ' Received'}: ` + fmt(finalPaymentAmount));
+    }
     let paidLineLabel;
     if(isFull){
       paidLineLabel = docCategory === 'invoice' ? 'Amount to be Paid (Full)' : 'Amount Received (Paid in Full)';
@@ -1091,6 +1176,8 @@
       { id: dpNextId++, name:'', price:0, qty:0 }
     ];
     renderDpItemsForm();
+    prevDpRecords = [];
+    renderPrevDpForm();
     updatePreview();
   });
 
