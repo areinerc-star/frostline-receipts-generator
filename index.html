@@ -450,31 +450,6 @@
     line-height:1.5;
   }
 
-  .receipt-proof{
-    padding:4px 26px 20px;
-  }
-  .receipt-proof-label{
-    font-family:'JetBrains Mono',monospace;
-    font-size:10px;
-    letter-spacing:0.08em;
-    text-transform:uppercase;
-    color:#6b6b6b;
-    margin-bottom:8px;
-  }
-  .receipt-proof img{
-    max-width:100%;
-    max-height:280px;
-    display:block;
-    border:1px solid #d8d8d8;
-    border-radius:4px;
-  }
-  .proof-filename{
-    font-family:'JetBrains Mono',monospace;
-    font-size:11.5px;
-    color:#4a6072;
-    word-break:break-all;
-  }
-
   .receipt-foot{
     padding:16px 26px 26px;
     display:flex;
@@ -522,6 +497,19 @@
   .logtable tbody tr:hover{background:rgba(255,255,255,0.04);}
   .logtable td.num{color:var(--frost); text-align:right;}
   .logtable td.due{color:var(--warm);}
+  .log-proof-btn{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ice);
+    font-family:'JetBrains Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    padding:4px 10px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .log-proof-btn:hover{border-color:var(--frost);}
   .logempty{padding:36px 20px; text-align:center; color:var(--steel); font-family:'JetBrains Mono',monospace; font-size:12px;}
   .logfoot{
     display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
@@ -529,6 +517,35 @@
     font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--steel);
   }
   .logfoot b{color:var(--ice); font-size:13px;}
+  .log-head{
+    width:100%;
+    background:transparent;
+    border:none;
+    cursor:pointer;
+    text-align:left;
+  }
+  .log-head-right{
+    display:flex; align-items:center; gap:10px;
+  }
+  .log-chevron{
+    color:var(--steel);
+    transition:transform .2s ease;
+    flex:none;
+  }
+  .logcard.collapsed .log-chevron{transform:rotate(-90deg);}
+  .log-body{
+    overflow:hidden;
+    max-height:2000px;
+    transition:max-height .25s ease;
+  }
+  .logcard.collapsed .log-body{
+    max-height:0;
+  }
+  .log-download-btn{
+    width:auto;
+    margin-left:auto;
+    padding:8px 16px;
+  }
 
   footer{
     max-width:1400px; margin:0 auto; padding:0 clamp(16px,4vw,56px) 40px;
@@ -606,7 +623,7 @@
         </div>
       </div>
 
-      <div class="field">
+      <div class="field" id="paymentMethodField">
         <label>Payment Method</label>
         <select id="fMethod">
           <option>Cash</option>
@@ -630,16 +647,14 @@
         </div>
       </div>
 
-      <div id="extraFieldsForm">
-        <div class="field">
-          <label id="lblIssuer">Received By</label>
-          <input type="text" id="fIssuer" placeholder="Staff name">
-        </div>
+      <div id="issuerField" class="field">
+        <label id="lblIssuer">Received By</label>
+        <input type="text" id="fIssuer" placeholder="Staff name">
+      </div>
 
-        <div class="field">
-          <label>Notes</label>
-          <textarea id="fNotes" placeholder="Optional — terms, next due date, reference no."></textarea>
-        </div>
+      <div id="notesField" class="field">
+        <label>Notes</label>
+        <textarea id="fNotes" placeholder="Optional — terms, next due date, reference no."></textarea>
       </div>
 
       <button type="submit" class="genbtn">Generate Receipt</button>
@@ -665,7 +680,7 @@
         <div class="frostline-mini"></div>
         <div class="receipt-body">
           <div class="rline"><div class="lbl" id="rNameLbl">Customer</div><div class="val" id="rName">—</div></div>
-          <div class="rline"><div class="lbl">Method</div><div class="val" id="rMethod">—</div></div>
+          <div class="rline" id="rMethodRow"><div class="lbl">Method</div><div class="val" id="rMethod">—</div></div>
           <div id="extraRowsReceipt">
             <div class="rline"><div class="lbl" id="rIssuerLbl">Received by</div><div class="val" id="rIssuer">—</div></div>
           </div>
@@ -675,11 +690,6 @@
         </div>
         <div class="receipt-notes" id="rNotesWrap">
           <span id="rNotes"></span>
-        </div>
-        <div class="receipt-proof" id="rProofWrap" style="display:none;">
-          <div class="receipt-proof-label">Proof of Transaction</div>
-          <img id="rProofImg" style="display:none;">
-          <div id="rProofFileName" class="proof-filename"></div>
         </div>
         <div class="receipt-foot">
           <span>frostline.receipts</span>
@@ -703,18 +713,26 @@
 
 <main style="padding-top:26px; display:block;">
   <div class="panel logcard">
-    <div class="panel-head">
+    <button type="button" class="panel-head log-head" id="logToggle">
       <h2>Receipt Log</h2>
-      <span class="idx" id="logCountIdx">0 entries — in-memory only</span>
-    </div>
-    <div id="logWrap">
-      <div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>
-    </div>
-    <div class="logfoot">
-      <span>Entries: <b id="lfCount">0</b></span>
-      <span>Total received: <b id="lfPaid">₱0.00</b></span>
-      <span>Total outstanding: <b id="lfDue">₱0.00</b></span>
-      <span>Total contract value: <b id="lfTotal">₱0.00</b></span>
+      <span class="log-head-right">
+        <span class="idx" id="logCountIdx">0 entries — in-memory only</span>
+        <svg id="logChevron" class="log-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M3 5L7 9L11 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+    </button>
+    <div id="logBody" class="log-body">
+      <div id="logWrap">
+        <div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>
+      </div>
+      <div class="logfoot">
+        <span>Entries: <b id="lfCount">0</b></span>
+        <span>Total received: <b id="lfPaid">₱0.00</b></span>
+        <span>Total outstanding: <b id="lfDue">₱0.00</b></span>
+        <span>Total contract value: <b id="lfTotal">₱0.00</b></span>
+        <button type="button" class="secbtn log-download-btn" id="logDownloadBtn" style="margin-top:0;">Download CSV</button>
+      </div>
     </div>
   </div>
 </main>
@@ -819,11 +837,22 @@
     $('nextNo').textContent = 'FL-' + pad(counter);
   }
 
+  function updateFieldVisibility(){
+    const isInvoice = docCategory === 'invoice';
+    const isDownpayment = currentType === 'downpayment';
+    $('paymentMethodField').style.display = isInvoice ? 'none' : '';
+    $('issuerField').style.display = (isDownpayment || isInvoice) ? 'none' : '';
+    $('notesField').style.display = isDownpayment ? 'none' : '';
+    $('rMethodRow').style.display = isInvoice ? 'none' : '';
+    $('extraRowsReceipt').style.display = (isDownpayment || isInvoice) ? 'none' : '';
+  }
+
   function setDoc(doc){
     docCategory = doc;
     document.querySelectorAll('#docToggle button').forEach(b=>{
       b.classList.toggle('active', b.dataset.doc === doc);
     });
+    updateFieldVisibility();
     updatePreview();
   }
 
@@ -835,9 +864,7 @@
     const t = typeLabels[type];
     $('lblName').textContent = t.name;
     $('lblIssuer').textContent = t.issuer;
-    const showExtras = type !== 'downpayment';
-    $('extraFieldsForm').style.display = showExtras ? '' : 'none';
-    $('extraRowsReceipt').style.display = showExtras ? '' : 'none';
+    updateFieldVisibility();
 
     $('dpPctRow').style.display = type === 'downpayment' ? '' : 'none';
 
@@ -959,22 +986,20 @@
     if(receiptLog.length === 0){
       $('logWrap').innerHTML = '<div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>';
     } else {
-      const rows = receiptLog.slice().reverse().map(e => `
+      const rows = receiptLog.map((e, idx) => ({ e, idx })).slice().reverse().map(({ e, idx }) => `
         <tr>
           <td>${e.no}</td>
-          <td>${e.docCategory}</td>
-          <td>${e.type}</td>
           <td>${e.name}</td>
           <td>${e.date}</td>
           <td class="num">${fmt(e.total)}</td>
-          <td class="num">${fmt(e.paid)}</td>
           <td class="num due">${fmt(e.bal)}</td>
+          <td>${e.proof ? `<button type="button" class="log-proof-btn" data-log-idx="${idx}">View</button>` : '—'}</td>
         </tr>`).join('');
       $('logWrap').innerHTML = `
         <table class="logtable">
           <thead><tr>
-            <th>No.</th><th>Doc</th><th>Type</th><th>Customer</th><th>Date</th>
-            <th>Total</th><th>Paid</th><th>Balance</th>
+            <th>No.</th><th>Customer</th><th>Date</th>
+            <th>Total</th><th>Balance</th><th>Proof</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>`;
@@ -987,6 +1012,49 @@
     $('lfPaid').textContent = fmt(sumPaid);
     $('lfDue').textContent = fmt(sumDue);
   }
+
+  $('logWrap').addEventListener('click', function(e){
+    const btn = e.target.closest('.log-proof-btn');
+    if(!btn) return;
+    const idx = Number(btn.dataset.logIdx);
+    const entry = receiptLog[idx];
+    if(!entry || !entry.proof) return;
+    const win = window.open();
+    if(!win) return;
+    if(entry.proof.isImage){
+      win.document.write(`<title>${entry.no} — Proof of Transaction</title><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${entry.proof.dataUrl}" style="max-width:100%;max-height:100vh;"></body>`);
+    } else {
+      win.location.href = entry.proof.dataUrl;
+    }
+  });
+
+  $('logToggle').addEventListener('click', function(){
+    $('logToggle').closest('.logcard').classList.toggle('collapsed');
+  });
+
+  $('logDownloadBtn').addEventListener('click', function(e){
+    e.stopPropagation();
+    if(receiptLog.length === 0){ return; }
+    const header = ['Receipt No','Document','Type','Customer','Date','Total','Paid','Balance','Has Proof'];
+    const csvRows = [header.join(',')];
+    receiptLog.forEach(entry=>{
+      const row = [
+        entry.no, entry.docCategory, entry.type,
+        `"${(entry.name||'').replace(/"/g,'""')}"`,
+        entry.date, entry.total.toFixed(2), entry.paid.toFixed(2), entry.bal.toFixed(2),
+        entry.proof ? 'Yes' : 'No'
+      ];
+      csvRows.push(row.join(','));
+    });
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'frostline-receipt-log-' + todayStr() + '.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  });
 
   $('rform').addEventListener('submit', function(e){
     e.preventDefault();
@@ -1001,7 +1069,8 @@
       date: $('rDate').textContent,
       total: grandTotal,
       paid: dpAmount,
-      bal: bal
+      bal: bal,
+      proof: proofData ? { dataUrl: proofData.dataUrl, isImage: proofData.isImage, name: proofData.name } : null
     });
     counter += 1;
     refreshNextNo();
@@ -1060,7 +1129,6 @@
     if(!proofData){
       wrap.style.display = 'none';
       label.textContent = 'Click to attach a screenshot / photo of payment';
-      $('rProofWrap').style.display = 'none';
       return;
     }
     wrap.style.display = '';
@@ -1072,15 +1140,6 @@
     } else {
       $('proofPreviewImg').style.display = 'none';
       $('proofFileName').textContent = proofData.name;
-    }
-    $('rProofWrap').style.display = '';
-    if(proofData.isImage){
-      $('rProofImg').src = proofData.dataUrl;
-      $('rProofImg').style.display = '';
-      $('rProofFileName').textContent = '';
-    } else {
-      $('rProofImg').style.display = 'none';
-      $('rProofFileName').textContent = proofData.name;
     }
   }
 
