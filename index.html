@@ -853,11 +853,16 @@
       ? `<div class="dp-item-line"><span class="lbl">Design/Template/Mockup Fee</span><span class="val">${fmt(fee)}</span></div>`
       : '';
 
-    let paidLineLabel;
-    if(isFull){
+    let paidLineLabel, paidLineAmount;
+    if(isFull && hasPrevDp){
+      paidLineLabel = docCategory === 'invoice' ? 'Final Payment (Due)' : 'Final Payment Received';
+      paidLineAmount = finalPaymentAmount;
+    } else if(isFull){
       paidLineLabel = docCategory === 'invoice' ? 'Amount to be Paid (Full)' : 'Amount Received (Paid in Full)';
+      paidLineAmount = dpAmount;
     } else {
       paidLineLabel = docCategory === 'invoice' ? `Amount to be Paid (${dpPct}%)` : `Downpayment Received (${dpPct}%)`;
+      paidLineAmount = dpAmount;
     }
 
     const balanceBlock = isFull
@@ -867,14 +872,13 @@
 
     const breakdownBlock = (isFull && hasPrevDp)
       ? prevDpList.map((r, i) => `<div class="aline"><span>Downpayment ${prevDpList.length > 1 ? (i+1) + ' ' : ''}Paid${r.date ? ' (' + r.date + ')' : ''}</span><span class="val">${fmt(r.amount)}</span></div>`).join('')
-        + `<div class="aline"><span>Final Payment${docCategory === 'invoice' ? ' (Due)' : ' Received'}</span><span class="val">${fmt(finalPaymentAmount)}</span></div>`
       : '';
 
     $('dpTablePreview').innerHTML = `
       <div class="dp-lines">${itemLines}${feeLine}</div>
       <div class="aline"><span>Grand total</span><span class="val">${fmt(grandTotal)}</span></div>
       ${breakdownBlock}
-      <div class="aline total"><span>${paidLineLabel}</span><span class="val">${fmt(dpAmount)}</span></div>
+      <div class="aline total"><span>${paidLineLabel}</span><span class="val">${fmt(paidLineAmount)}</span></div>
       ${balanceBlock}`;
 
     const summary = $('dpSummary');
@@ -1049,15 +1053,19 @@
       prevDpList.forEach((r, i) => {
         lines.push(`Downpayment ${prevDpList.length > 1 ? (i+1) + ' ' : ''}Paid${r.date ? ' (' + r.date + ')' : ''}: ` + fmt(r.amount));
       });
-      lines.push(`Final Payment${docCategory === 'invoice' ? ' (Due)' : ' Received'}: ` + fmt(finalPaymentAmount));
     }
-    let paidLineLabel;
-    if(isFull){
+    let paidLineLabel, paidLineAmount;
+    if(isFull && hasPrevDp){
+      paidLineLabel = docCategory === 'invoice' ? 'Final Payment (Due)' : 'Final Payment Received';
+      paidLineAmount = finalPaymentAmount;
+    } else if(isFull){
       paidLineLabel = docCategory === 'invoice' ? 'Amount to be Paid (Full)' : 'Amount Received (Paid in Full)';
+      paidLineAmount = dpAmount;
     } else {
       paidLineLabel = docCategory === 'invoice' ? `Amount to be Paid (${dpPct}%)` : `Downpayment Received (${dpPct}%)`;
+      paidLineAmount = dpAmount;
     }
-    lines.push(`${paidLineLabel}: ` + fmt(dpAmount));
+    lines.push(`${paidLineLabel}: ` + fmt(paidLineAmount));
     if(!isFull){
       lines.push('Balance — Unpaid: ' + fmt(Math.max(grandTotal - dpAmount, 0)) + ' (payable upon completion, before release of customized item(s))');
     }
@@ -1198,7 +1206,8 @@
   $('rform').addEventListener('submit', function(e){
     e.preventDefault();
     updatePreview();
-    const { grandTotal, dpAmount, isFull } = computeDpTotals();
+    const { grandTotal, dpAmount, isFull, hasPrevDp, finalPaymentAmount } = computeDpTotals();
+    const paidToday = (isFull && hasPrevDp) ? finalPaymentAmount : dpAmount;
     const bal = isFull ? 0 : Math.max(grandTotal - dpAmount, 0);
     const entry = {
       no: $('rNo').textContent,
@@ -1207,7 +1216,7 @@
       name: $('fName').value.trim() || '—',
       date: $('rDate').textContent,
       total: grandTotal,
-      paid: dpAmount,
+      paid: paidToday,
       bal: bal,
       proof: proofData ? { dataUrl: proofData.dataUrl, isImage: proofData.isImage, name: proofData.name } : null
     };
