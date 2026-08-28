@@ -640,6 +640,10 @@
           <input type="checkbox" id="fMockupFee">
           <span>Apply Design/Template/Mockup Fee (₱560)</span>
         </label>
+        <div class="field" id="grandTotalField">
+          <label style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);">Grand Total <span style="color:var(--frost-dim); text-transform:none; letter-spacing:0;">(auto-sums from items — edit to override)</span></label>
+          <input type="number" id="fGrandTotal" step="0.01" min="0">
+        </div>
         <div class="dp-pct-row" id="dpPctRow">
           <label style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);">DP %</label>
           <input type="number" id="fDpPct" value="50" min="0" max="100" step="1">
@@ -790,6 +794,7 @@
   ];
   let prevDpNextId = 1;
   let prevDpRecords = [];
+  let grandTotalOverride = null; // null = auto-sum from items; number = user override
 
   const MOCKUP_FEE = 560;
 
@@ -801,7 +806,8 @@
     const itemsTotal = items.reduce((s,it)=> s + it.price*it.qty, 0);
     const feeApplies = $('fMockupFee').checked;
     const fee = feeApplies ? MOCKUP_FEE : 0;
-    const grandTotal = itemsTotal + fee;
+    const autoGrandTotal = itemsTotal + fee;
+    const grandTotal = grandTotalOverride !== null ? grandTotalOverride : autoGrandTotal;
     const dpAmount = isFull ? grandTotal : grandTotal * (pct/100);
     const prevDpList = isFull
       ? prevDpRecords
@@ -815,7 +821,8 @@
     const prevDpAmount = prevDpList.reduce((s,r)=> s + r.amount, 0);
     const hasPrevDp = isFull && prevDpAmount > 0;
     const finalPaymentAmount = hasPrevDp ? Math.max(grandTotal - prevDpAmount, 0) : dpAmount;
-    return { items, itemsTotal, totalQty, feeApplies, fee, grandTotal, dpAmount, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount };
+    const isOverridden = grandTotalOverride !== null;
+    return { items, itemsTotal, totalQty, feeApplies, fee, autoGrandTotal, grandTotal, isOverridden, dpAmount, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount };
   }
 
   function renderPrevDpForm(){
@@ -838,10 +845,16 @@
   }
 
   function renderDpTablePreview(){
-    const { items, itemsTotal, feeApplies, fee, grandTotal, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount } = computeDpTotals();
+    const { items, itemsTotal, feeApplies, fee, grandTotal, isOverridden, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount } = computeDpTotals();
     const activeItems = items.filter(it => it.name || it.price || it.qty);
     const list = activeItems.length ? activeItems : items;
     const balance = Math.max(grandTotal - dpAmount, 0);
+
+    // Keep the Grand Total input in sync with the current computed value,
+    // unless the field currently has focus (don't fight the user mid-edit).
+    if(document.activeElement !== $('fGrandTotal')){
+      $('fGrandTotal').value = grandTotal ? grandTotal.toFixed(2) : '';
+    }
 
     const itemLines = list.map(it => {
       const label = it.name || 'Item';
@@ -876,7 +889,7 @@
 
     $('dpTablePreview').innerHTML = `
       <div class="dp-lines">${itemLines}${feeLine}</div>
-      <div class="aline"><span>Grand total</span><span class="val">${fmt(grandTotal)}</span></div>
+      <div class="aline"><span>Grand total${isOverridden ? ' (adjusted)' : ''}</span><span class="val">${fmt(grandTotal)}</span></div>
       ${breakdownBlock}
       <div class="aline total"><span>${paidLineLabel}</span><span class="val">${fmt(paidLineAmount)}</span></div>
       ${balanceBlock}`;
@@ -976,7 +989,16 @@
   });
 
   $('fDpPct').addEventListener('input', updatePreview);
-  $('fMockupFee').addEventListener('change', updatePreview);
+  $('fMockupFee').addEventListener('change', function(){
+    grandTotalOverride = null; // fee toggled — go back to auto-sum
+    updatePreview();
+  });
+
+  $('fGrandTotal').addEventListener('input', function(e){
+    const val = e.target.value;
+    grandTotalOverride = val === '' ? null : (parseFloat(val) || 0);
+    updatePreview();
+  });
 
   $('prevDpAddBtn').addEventListener('click', function(){
     prevDpRecords.push({ id: prevDpNextId++, date: '', amount: 0 });
@@ -1012,6 +1034,7 @@
     if(!item) return;
     if(t.dataset.field === 'name') item.name = t.value;
     else item[t.dataset.field] = parseFloat(t.value) || 0;
+    grandTotalOverride = null; // items changed — go back to auto-sum
     updatePreview();
   });
 
@@ -1022,12 +1045,14 @@
     dpItems = dpItems.filter(i => i.id !== id);
     if(dpItems.length === 0) dpItems.push({ id: dpNextId++, name:'', price:0, qty:0 });
     renderDpItemsForm();
+    grandTotalOverride = null;
     updatePreview();
   });
 
   $('dpAddItem').addEventListener('click', function(){
     dpItems.push({ id: dpNextId++, name:'', price:0, qty:0 });
     renderDpItemsForm();
+    grandTotalOverride = null;
     updatePreview();
   });
 
@@ -1039,7 +1064,7 @@
     lines.push($('rNameLbl').textContent + ': ' + $('rName').textContent);
     lines.push('Method: ' + $('rMethod').textContent);
     lines.push('');
-    const { items, feeApplies, fee, grandTotal, dpAmount, dpPct, isFull, hasPrevDp, prevDpList, finalPaymentAmount } = computeDpTotals();
+    const { items, feeApplies, fee, grandTotal, isOverridden, dpAmount, dpPct, isFull, hasPrevDp, prevDpList, finalPaymentAmount } = computeDpTotals();
     items.forEach(it=>{
       if(!it.name && !it.price && !it.qty) return;
       lines.push(`${it.name || 'Item'} — ${it.qty} pc(s) x ${fmt(it.price)} = ${fmt(it.price*it.qty)}`);
@@ -1048,7 +1073,7 @@
       lines.push('Design/Template/Mockup Fee: ' + fmt(fee));
     }
     lines.push('');
-    lines.push('Grand Total: ' + fmt(grandTotal));
+    lines.push(`Grand Total${isOverridden ? ' (adjusted)' : ''}: ` + fmt(grandTotal));
     if(isFull && hasPrevDp){
       prevDpList.forEach((r, i) => {
         lines.push(`Downpayment ${prevDpList.length > 1 ? (i+1) + ' ' : ''}Paid${r.date ? ' (' + r.date + ')' : ''}: ` + fmt(r.amount));
@@ -1241,6 +1266,7 @@
       { id: dpNextId++, name:'', price:0, qty:0 }
     ];
     renderDpItemsForm();
+    grandTotalOverride = null;
     prevDpRecords = [];
     renderPrevDpForm();
     updatePreview();
