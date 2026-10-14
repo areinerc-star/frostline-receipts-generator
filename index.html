@@ -794,7 +794,7 @@
           &ldquo;Crafted for dreamers, built for believers.&rdquo;
           <span class="closer">Wear Your Confidence</span>
         </div>
-        <div class="receipt-bir">
+        <div class="receipt-bir" id="rBirBlock">
           <div class="bir-info">
             <div class="bir-title">BIR Information</div>
             <div class="bir-line">TIN: 635-375-041-00000</div>
@@ -1001,6 +1001,8 @@
     $('notesField').style.display = isDownpayment ? 'none' : '';
     $('rMethodRow').style.display = isInvoice ? 'none' : '';
     $('extraRowsReceipt').style.display = (isDownpayment || isInvoice) ? 'none' : '';
+    const birBlock = $('rBirBlock');
+    if(birBlock) birBlock.style.display = isInvoice ? '' : 'none';
   }
 
   function setDoc(doc){
