@@ -378,16 +378,18 @@
 
   /* ---------- email section ---------- */
   .email-row{
-    display:flex; gap:8px; padding:0 22px 22px; align-items:stretch;
+    display:flex; gap:10px; padding:0 22px 22px; align-items:stretch; flex-wrap:wrap;
   }
   .email-row input{
     flex:1;
+    min-width:140px;
     height:42px;
     box-sizing:border-box;
     margin:0;
   }
   .email-row button{
-    flex:none;
+    flex:1;
+    min-width:140px;
     white-space:nowrap;
     height:42px;
     box-sizing:border-box;
@@ -705,6 +707,10 @@
           <input type="checkbox" id="fMockupFee">
           <span>Apply Design/Template/Mockup Fee (₱560)</span>
         </label>
+        <label class="dp-fee-toggle">
+          <input type="checkbox" id="fNeedsOR">
+          <span>Needs OR &mdash; show BIR info &amp; QR on receipt</span>
+        </label>
         <div class="field" id="grandTotalField">
           <label style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);">Grand Total <span style="color:var(--frost-dim); text-transform:none; letter-spacing:0;">(auto-sums from items — edit to override)</span></label>
           <input type="number" id="fGrandTotal" step="0.01" min="0">
@@ -756,7 +762,7 @@
         <textarea id="fNotes" placeholder="Optional — terms, next due date, reference no."></textarea>
       </div>
 
-      <button type="submit" class="genbtn">Generate Receipt</button>
+      <button type="submit" class="genbtn" id="submitBtn">Generate Receipt</button>
       <button type="button" class="secbtn" id="clearForm">Clear Fields</button>
     </form>
   </div>
@@ -826,9 +832,28 @@
 <div class="frostline dim"></div>
 
 <main style="padding-top:26px; display:block;">
+  <div class="panel logcard" id="pendingCard">
+    <button type="button" class="panel-head log-head" id="pendingToggle">
+      <h2>Pending Invoices</h2>
+      <span class="log-head-right">
+        <span class="idx" id="pendingCountIdx">0 entries — in-memory only</span>
+        <svg class="log-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M3 5L7 9L11 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+    </button>
+    <div id="pendingBody" class="log-body">
+      <div id="pendingWrap">
+        <div class="logempty">No pending invoices. Save an invoice (Invoice toggle + Generate) and it's tracked here until marked paid.</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<main style="padding-top:0; display:block;">
   <div class="panel logcard">
     <button type="button" class="panel-head log-head" id="logToggle">
-      <h2>Receipt Log</h2>
+      <h2>History</h2>
       <span class="log-head-right">
         <span class="idx" id="logCountIdx">0 entries — in-memory only</span>
         <svg id="logChevron" class="log-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -838,7 +863,7 @@
     </button>
     <div id="logBody" class="log-body">
       <div id="logWrap">
-        <div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>
+        <div class="logempty">No history yet. Receipts land here once generated, or when a pending invoice is marked paid.</div>
       </div>
       <div class="logfoot">
         <span>Entries: <b id="lfCount">0</b></span>
@@ -867,6 +892,8 @@
   let docCategory = 'receipt';
   let counter = 1;
   let receiptLog = [];
+  let pendingInvoices = [];
+  let manualNo = null; // set while re-generating a receipt from a pending invoice, to reuse its number
   let dpNextId = 3;
   let dpItems = [
     { id: 1, name: '', price: 0, qty: 0 },
@@ -1002,7 +1029,7 @@
     $('rMethodRow').style.display = isInvoice ? 'none' : '';
     $('extraRowsReceipt').style.display = (isDownpayment || isInvoice) ? 'none' : '';
     const birBlock = $('rBirBlock');
-    if(birBlock) birBlock.style.display = isInvoice ? '' : 'none';
+    if(birBlock) birBlock.style.display = $('fNeedsOR').checked ? '' : 'none';
   }
 
   function setDoc(doc){
@@ -1010,6 +1037,8 @@
     document.querySelectorAll('#docToggle button').forEach(b=>{
       b.classList.toggle('active', b.dataset.doc === doc);
     });
+    const submitBtn = $('submitBtn');
+    if(submitBtn) submitBtn.textContent = doc === 'invoice' ? 'Save Pending Invoice' : 'Generate Receipt';
     updateFieldVisibility();
     updatePreview();
   }
@@ -1044,7 +1073,7 @@
 
     $('rType').textContent = docLabel;
     $('hdrType').textContent = docLabel.split(' — ')[0];
-    $('rNo').textContent = 'FL-' + pad(counter);
+    $('rNo').textContent = manualNo || ('FL-' + pad(counter));
     $('rDate').textContent = dateVal ? new Date(dateVal+'T00:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}) : '—';
     $('rNameLbl').textContent = t.name;
     $('rName').textContent = name;
@@ -1073,6 +1102,11 @@
   $('fDpPct').addEventListener('input', updatePreview);
   $('fMockupFee').addEventListener('change', function(){
     grandTotalOverride = null; // fee toggled — go back to auto-sum
+    updatePreview();
+  });
+
+  $('fNeedsOR').addEventListener('change', function(){
+    updateFieldVisibility();
     updatePreview();
   });
 
@@ -1207,6 +1241,137 @@
     renderLog();
   }
 
+  let remotePendingConnected = null;
+
+  async function loadRemotePending(){
+    try{
+      const res = await fetch('/api/pending');
+      if(!res.ok){ remotePendingConnected = false; renderPending(); return; }
+      const remote = await res.json();
+      remotePendingConnected = true;
+      if(Array.isArray(remote)){
+        pendingInvoices = remote.map(e => ({ ...e, proof: null, hasProof: !!e.hasProof }));
+      }
+    } catch(err){
+      remotePendingConnected = false; // no backend yet, stay local-only
+    }
+    renderPending();
+  }
+
+  function syncPendingEntry(entry){
+    const payload = { ...entry, proof: undefined, hasProof: !!entry.proof };
+    fetch('/api/pending', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(res => { remotePendingConnected = res.ok; renderPending(); })
+      .catch(() => { remotePendingConnected = false; renderPending(); });
+  }
+
+  function deleteRemotePending(no){
+    fetch('/api/pending?no=' + encodeURIComponent(no), { method: 'DELETE' })
+      .then(res => { remotePendingConnected = res.ok; })
+      .catch(() => { remotePendingConnected = false; });
+  }
+
+  function renderPending(){
+    const statusLabel = remotePendingConnected === true ? 'synced'
+      : remotePendingConnected === false ? 'local only — backend not connected'
+      : 'in-memory only';
+    $('pendingCountIdx').textContent = pendingInvoices.length + (pendingInvoices.length === 1 ? ' entry — ' : ' entries — ') + statusLabel;
+    if(pendingInvoices.length === 0){
+      $('pendingWrap').innerHTML = '<div class="logempty">No pending invoices. Save an invoice (Invoice toggle + Generate) and it\'s tracked here until marked paid.</div>';
+    } else {
+      const rows = pendingInvoices.map((p, idx) => `
+        <tr>
+          <td>${p.no}</td>
+          <td>${p.name}</td>
+          <td>${p.type === 'full' ? 'Full Payment' : 'Downpayment'}</td>
+          <td class="num due">${fmt(p.amountDue)}</td>
+          <td>${p.dateVal ? new Date(p.dateVal+'T00:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}) : '—'}</td>
+          <td style="white-space:nowrap;">
+            <button type="button" class="log-proof-btn" data-pend-pay="${p.no}">Mark Paid</button>
+            <button type="button" class="log-proof-btn" data-pend-del="${p.no}" style="margin-left:6px;">Delete</button>
+          </td>
+        </tr>`).join('');
+      $('pendingWrap').innerHTML = `
+        <table class="logtable">
+          <thead><tr>
+            <th>No.</th><th>Customer</th><th>Type</th>
+            <th>Amount Due</th><th>Date</th><th>Action</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+  }
+
+  function restorePendingIntoForm(p){
+    $('fName').value = p.name || '';
+    $('fMethod').value = p.method || 'Cash';
+    $('fIssuer').value = p.issuer || '';
+    $('fNotes').value = p.notes || '';
+    $('fDate').value = todayStr(); // date the payment is actually received
+    $('fMockupFee').checked = !!p.mockupFee;
+    $('fNeedsOR').checked = !!p.needsOR;
+    $('fDpPct').value = p.dpPct || 50;
+
+    dpItems = (p.items && p.items.length ? p.items : [{name:'',price:0,qty:0},{name:'',price:0,qty:0}])
+      .map(it => ({ id: dpNextId++, name: it.name || '', price: it.price || 0, qty: it.qty || 0 }));
+    prevDpRecords = (p.prevDp || []).map(r => ({ id: prevDpNextId++, amount: r.amount || 0, date: r.date || '' }));
+    grandTotalOverride = (typeof p.grandTotalOverride === 'number') ? p.grandTotalOverride : null;
+    renderDpItemsForm();
+    renderPrevDpForm();
+
+    currentType = p.type === 'full' ? 'full' : 'downpayment';
+    docCategory = 'receipt';
+    document.querySelectorAll('#typeToggle button').forEach(b=>{
+      b.classList.toggle('active', b.dataset.type === currentType);
+    });
+    document.querySelectorAll('#docToggle button').forEach(b=>{
+      b.classList.toggle('active', b.dataset.doc === 'receipt');
+    });
+    const t = typeLabels[currentType];
+    $('lblName').textContent = t.name;
+    $('lblIssuer').textContent = t.issuer;
+    $('dpPctRow').style.display = currentType === 'downpayment' ? '' : 'none';
+    $('prevDpSection').style.display = currentType === 'full' ? '' : 'none';
+    const submitBtn = $('submitBtn');
+    if(submitBtn) submitBtn.textContent = 'Generate Receipt';
+    updateFieldVisibility();
+  }
+
+  function markPendingPaid(no){
+    const idx = pendingInvoices.findIndex(p => p.no === no);
+    if(idx === -1) return;
+    const p = pendingInvoices[idx];
+    restorePendingIntoForm(p);
+    manualNo = p.no; // reuse the invoice's own number for the matching receipt
+    commitToHistory(false);
+    manualNo = null;
+    pendingInvoices.splice(idx, 1);
+    renderPending();
+    deleteRemotePending(p.no);
+  }
+
+  function deletePending(no){
+    const idx = pendingInvoices.findIndex(p => p.no === no);
+    if(idx === -1) return;
+    pendingInvoices.splice(idx, 1);
+    renderPending();
+    deleteRemotePending(no);
+  }
+
+  $('pendingWrap').addEventListener('click', function(e){
+    const payBtn = e.target.closest('[data-pend-pay]');
+    if(payBtn){ markPendingPaid(payBtn.dataset.pendPay); return; }
+    const delBtn = e.target.closest('[data-pend-del]');
+    if(delBtn){ deletePending(delBtn.dataset.pendDel); return; }
+  });
+
+  $('pendingToggle').addEventListener('click', function(){
+    $('pendingToggle').closest('.logcard').classList.toggle('collapsed');
+  });
+
   function syncLogEntry(entry){
     // Send a lightweight copy — never the embedded image data — to keep the
     // shared log small and fast regardless of how many receipts have proofs.
@@ -1230,7 +1395,7 @@
       : 'in-memory only';
     $('logCountIdx').textContent = receiptLog.length + (receiptLog.length === 1 ? ' entry — ' : ' entries — ') + statusLabel;
     if(receiptLog.length === 0){
-      $('logWrap').innerHTML = '<div class="logempty">No receipts generated yet. Click "Generate Receipt" to add one here.</div>';
+      $('logWrap').innerHTML = '<div class="logempty">No history yet. Receipts land here once generated, or when a pending invoice is marked paid.</div>';
     } else {
       const rows = receiptLog.map((e, idx) => ({ e, idx })).slice().reverse().map(({ e, idx }) => {
         let proofCell = '—';
@@ -1305,18 +1470,16 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'frostline-receipt-log-' + todayStr() + '.csv';
+    link.download = 'frostline-history-' + todayStr() + '.csv';
     link.click();
     URL.revokeObjectURL(url);
   });
 
-  $('rform').addEventListener('submit', function(e){
-    e.preventDefault();
-    updatePreview();
+  function buildCurrentEntry(){
     const { grandTotal, dpAmount, isFull, hasPrevDp, finalPaymentAmount } = computeDpTotals();
     const paidToday = (isFull && hasPrevDp) ? finalPaymentAmount : dpAmount;
     const bal = isFull ? 0 : Math.max(grandTotal - dpAmount, 0);
-    const entry = {
+    return {
       no: $('rNo').textContent,
       docCategory: docCategory === 'invoice' ? 'Invoice' : 'Receipt',
       type: currentType === 'full' ? 'Full Payment' : 'Downpayment',
@@ -1327,12 +1490,57 @@
       bal: bal,
       proof: proofData ? { dataUrl: proofData.dataUrl, isImage: proofData.isImage, name: proofData.name } : null
     };
+  }
+
+  function commitToHistory(advanceCounter){
+    updatePreview();
+    const entry = buildCurrentEntry();
     receiptLog.push(entry);
-    counter += 1;
-    refreshNextNo();
+    if(advanceCounter){ counter += 1; refreshNextNo(); }
     updatePreview();
     renderLog();
     syncLogEntry(entry);
+    return entry;
+  }
+
+  function savePendingInvoice(){
+    updatePreview();
+    const { grandTotal, dpAmount, isFull, hasPrevDp, finalPaymentAmount } = computeDpTotals();
+    const amountDueNow = (isFull && hasPrevDp) ? finalPaymentAmount : dpAmount;
+    const entry = {
+      no: $('rNo').textContent,
+      type: currentType,
+      name: $('fName').value.trim() || '—',
+      method: $('fMethod').value,
+      issuer: $('fIssuer').value.trim() || '',
+      notes: $('fNotes').value.trim() || '',
+      dateVal: $('fDate').value,
+      items: dpItems.map(it => ({ name: it.name || '', price: it.price || 0, qty: it.qty || 0 })),
+      mockupFee: $('fMockupFee').checked,
+      dpPct: parseFloat($('fDpPct').value) || 0,
+      prevDp: prevDpRecords.map(r => ({ amount: r.amount || 0, date: r.date || '' })),
+      grandTotalOverride: grandTotalOverride,
+      needsOR: $('fNeedsOR').checked,
+      amountDue: amountDueNow,
+      contractValue: grandTotal,
+      proof: proofData ? { dataUrl: proofData.dataUrl, isImage: proofData.isImage, name: proofData.name } : null,
+      createdAt: Date.now()
+    };
+    pendingInvoices.push(entry);
+    counter += 1;
+    refreshNextNo();
+    updatePreview();
+    renderPending();
+    syncPendingEntry(entry);
+  }
+
+  $('rform').addEventListener('submit', function(e){
+    e.preventDefault();
+    if(docCategory === 'invoice'){
+      savePendingInvoice();
+    } else {
+      commitToHistory(true);
+    }
   });
 
   $('clearForm').addEventListener('click', function(){
@@ -1340,6 +1548,7 @@
     $('fDate').value = todayStr();
     $('fDpPct').value = 50;
     $('fMockupFee').checked = false;
+    $('fNeedsOR').checked = false;
     $('fProof').value = '';
     proofData = null;
     renderProofPreview();
@@ -1438,6 +1647,7 @@
   renderDpItemsForm();
   setType('downpayment');
   loadRemoteLog();
+  loadRemotePending();
 })();
 </script>
 
