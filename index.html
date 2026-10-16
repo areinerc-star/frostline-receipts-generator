@@ -741,6 +741,11 @@
           <span id="dpSummary">Grand total ₱0.00 — DP ₱0.00</span>
         </div>
 
+        <div class="field" id="receivedAmountField">
+          <label style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);">Amount Received <span style="color:var(--frost-dim); text-transform:none; letter-spacing:0;">(auto from DP% — edit if client sent more/less)</span></label>
+          <input type="number" id="fReceivedAmount" step="0.01" min="0">
+        </div>
+
         <div id="prevDpSection" style="display:none;">
           <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel); margin-bottom:7px;">Previous Downpayment Records (optional)</label>
           <div id="prevDpList"></div>
@@ -924,6 +929,7 @@
   let discountNextId = 1;
   let discountRecords = [];
   let grandTotalOverride = null; // null = auto-sum from items; number = user override
+  let receivedAmountOverride = null; // null = auto (% of grand total / final installment); number = actual amount received
   let activePendingNo = null; // set while a pending invoice is loaded into the form for payment
 
   const MOCKUP_FEE = 560;
@@ -951,7 +957,7 @@
     const discountTotal = discountRecords.reduce((s,r)=> s + (parseFloat(r.amount) || 0), 0);
     const autoGrandTotal = Math.max(itemsTotal + fee - discountTotal, 0);
     const grandTotal = grandTotalOverride !== null ? grandTotalOverride : autoGrandTotal;
-    const dpAmount = isFull ? grandTotal : grandTotal * (pct/100);
+    const autoDpAmount = isFull ? grandTotal : grandTotal * (pct/100);
     const prevDpList = isFull
       ? prevDpRecords
           .map(r => ({
@@ -963,9 +969,16 @@
       : [];
     const prevDpAmount = prevDpList.reduce((s,r)=> s + r.amount, 0);
     const hasPrevDp = isFull && prevDpAmount > 0;
-    const finalPaymentAmount = hasPrevDp ? Math.max(grandTotal - prevDpAmount, 0) : dpAmount;
+    const autoFinalPaymentAmount = hasPrevDp ? Math.max(grandTotal - prevDpAmount, 0) : autoDpAmount;
+    // Amount Received override: lets staff record what actually came in
+    // (clients sometimes send more than the computed downpayment/final
+    // installment) without that extra amount being swallowed by rounding
+    // against the auto-calculated figure.
+    const isReceivedOverridden = receivedAmountOverride !== null;
+    const dpAmount = (!hasPrevDp && isReceivedOverridden) ? receivedAmountOverride : autoDpAmount;
+    const finalPaymentAmount = (hasPrevDp && isReceivedOverridden) ? receivedAmountOverride : autoFinalPaymentAmount;
     const isOverridden = grandTotalOverride !== null;
-    return { items, itemsTotal, totalQty, feeApplies, fee, discountTotal, autoGrandTotal, grandTotal, isOverridden, dpAmount, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount };
+    return { items, itemsTotal, totalQty, feeApplies, fee, discountTotal, autoGrandTotal, grandTotal, isOverridden, dpAmount, autoDpAmount, isReceivedOverridden, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount, autoFinalPaymentAmount };
   }
 
   function renderPrevDpForm(){
@@ -1010,7 +1023,7 @@
   }
 
   function renderDpTablePreview(){
-    const { items, itemsTotal, feeApplies, fee, discountTotal, grandTotal, isOverridden, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount } = computeDpTotals();
+    const { items, itemsTotal, feeApplies, fee, discountTotal, grandTotal, isOverridden, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount, isReceivedOverridden } = computeDpTotals();
     const activeItems = items.filter(it => it.name || it.price || it.qty);
     const list = activeItems.length ? activeItems : items;
     const balance = Math.max(grandTotal - dpAmount, 0);
@@ -1019,6 +1032,24 @@
     // unless the field currently has focus (don't fight the user mid-edit).
     if(document.activeElement !== $('fGrandTotal')){
       $('fGrandTotal').value = grandTotal ? grandTotal.toFixed(2) : '';
+    }
+
+    // The "Amount Received" override only makes sense where a payment
+    // amount is actually being computed from something else (a DP% of the
+    // grand total, or a final installment after previous downpayments) —
+    // for a plain Full Payment the Grand Total field already is that figure.
+    const receivedField = $('receivedAmountField');
+    const showReceivedField = !isFull || hasPrevDp;
+    if(receivedField) receivedField.style.display = showReceivedField ? '' : 'none';
+    const receivedLabel = document.querySelector('#receivedAmountField label');
+    if(receivedLabel){
+      receivedLabel.innerHTML = hasPrevDp
+        ? 'Amount Received <span style="color:var(--frost-dim); text-transform:none; letter-spacing:0;">(auto from remaining balance — edit if client sent more/less)</span>'
+        : 'Amount Received <span style="color:var(--frost-dim); text-transform:none; letter-spacing:0;">(auto from DP% — edit if client sent more/less)</span>';
+    }
+    const receivedForDisplay = hasPrevDp ? finalPaymentAmount : dpAmount;
+    if(document.activeElement !== $('fReceivedAmount')){
+      $('fReceivedAmount').value = receivedForDisplay ? receivedForDisplay.toFixed(2) : '';
     }
 
     const itemLines = list.map(it => {
@@ -1046,6 +1077,7 @@
       paidLineLabel = docCategory === 'invoice' ? `Amount to be Paid (${dpPct}%)` : `Downpayment Received (${dpPct}%)`;
       paidLineAmount = dpAmount;
     }
+    if(isReceivedOverridden && docCategory !== 'invoice'){ paidLineLabel += ' (adjusted)'; }
 
     const balanceBlock = isFull
       ? ''
@@ -1171,6 +1203,7 @@
   $('fDpPct').addEventListener('input', updatePreview);
   $('fMockupFee').addEventListener('change', function(){
     grandTotalOverride = null; // fee toggled — go back to auto-sum
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1182,6 +1215,12 @@
   $('fGrandTotal').addEventListener('input', function(e){
     const val = e.target.value;
     grandTotalOverride = val === '' ? null : (parseFloat(val) || 0);
+    updatePreview();
+  });
+
+  $('fReceivedAmount').addEventListener('input', function(e){
+    const val = e.target.value;
+    receivedAmountOverride = val === '' ? null : (parseFloat(val) || 0);
     updatePreview();
   });
 
@@ -1215,6 +1254,7 @@
     discountRecords.push({ id: discountNextId++, label: '', amount: 0 });
     renderDiscountForm();
     grandTotalOverride = null;
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1227,6 +1267,7 @@
     if(t.dataset.field === 'label') record.label = t.value;
     else record[t.dataset.field] = parseFloat(t.value) || 0;
     grandTotalOverride = null;
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1237,6 +1278,7 @@
     discountRecords = discountRecords.filter(r => r.id !== id);
     renderDiscountForm();
     grandTotalOverride = null;
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1249,6 +1291,7 @@
     if(t.dataset.field === 'name') item.name = t.value;
     else item[t.dataset.field] = parseFloat(t.value) || 0;
     grandTotalOverride = null; // items changed — go back to auto-sum
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1282,6 +1325,7 @@
     if(dpItems.length === 0) dpItems.push({ id: dpNextId++, name:'', price:0, qty:0 });
     renderDpItemsForm();
     grandTotalOverride = null;
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1289,6 +1333,7 @@
     dpItems.push({ id: dpNextId++, name:'', price:0, qty:0 });
     renderDpItemsForm();
     grandTotalOverride = null;
+    receivedAmountOverride = null;
     updatePreview();
   });
 
@@ -1443,6 +1488,7 @@
     prevDpRecords = (p.prevDp || []).map(r => ({ id: prevDpNextId++, amount: r.amount || 0, date: r.date || '' }));
     discountRecords = (p.discount || []).map(r => ({ id: discountNextId++, label: r.label || '', amount: r.amount || 0 }));
     grandTotalOverride = (typeof p.grandTotalOverride === 'number') ? p.grandTotalOverride : null;
+    receivedAmountOverride = (typeof p.receivedAmountOverride === 'number') ? p.receivedAmountOverride : null;
     renderDpItemsForm();
     renderPrevDpForm();
     renderDiscountForm();
@@ -1700,6 +1746,7 @@
       prevDp: prevDpRecords.map(r => ({ amount: r.amount || 0, date: r.date || '' })),
       discount: discountRecords.map(r => ({ label: r.label || '', amount: r.amount || 0 })),
       grandTotalOverride: grandTotalOverride,
+      receivedAmountOverride: receivedAmountOverride,
       needsOR: $('fNeedsOR').checked,
       amountDue: amountDueNow,
       contractValue: grandTotal,
@@ -1749,6 +1796,7 @@
     ];
     renderDpItemsForm();
     grandTotalOverride = null;
+    receivedAmountOverride = null;
     prevDpRecords = [];
     renderPrevDpForm();
     discountRecords = [];
