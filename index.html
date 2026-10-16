@@ -608,6 +608,13 @@
   }
   .log-proof-btn:hover{border-color:var(--frost);}
   .logempty{padding:36px 20px; text-align:center; color:var(--steel); font-family:'JetBrains Mono',monospace; font-size:12px;}
+  .log-total-view{cursor:pointer; border-bottom:1px dashed var(--steel); padding-bottom:1px;}
+  .log-total-view:hover{color:var(--ice); border-bottom-color:var(--ice);}
+  .log-total-edit{
+    width:92px; background:#0c1620; border:1px solid var(--ice); border-radius:4px;
+    color:var(--frost); font-family:'JetBrains Mono',monospace; font-size:12px;
+    text-align:right; padding:3px 6px;
+  }
   .logfoot{
     display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
     padding:14px 20px; border-top:1px solid var(--line);
@@ -1510,6 +1517,27 @@
       .catch(() => { remoteLogConnected = false; renderLog(); });
   }
 
+  function updateRemoteLogEntry(no, patch){
+    // Best-effort — if the backend isn't connected this just no-ops, since
+    // the local copy of receiptLog is already the source of truth on screen.
+    fetch('/api/log?no=' + encodeURIComponent(no), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    }).catch(() => {});
+  }
+
+  function commitLogTotalEdit(idx, rawValue){
+    const entry = receiptLog[idx];
+    if(!entry) return;
+    const next = parseFloat(rawValue);
+    if(!isFinite(next) || next < 0){ renderLog(); return; } // invalid — just redraw, discarding the edit
+    entry.total = next;
+    entry.bal = Math.max(next - entry.paid, 0);
+    renderLog();
+    updateRemoteLogEntry(entry.no, { total: entry.total, bal: entry.bal });
+  }
+
   function renderLog(){
     const statusLabel = remoteLogConnected === true ? 'synced'
       : remoteLogConnected === false ? 'local only — backend not connected'
@@ -1530,7 +1558,7 @@
           <td>${e.no}</td>
           <td>${e.name}</td>
           <td>${e.date}</td>
-          <td class="num">${fmt(e.total)}</td>
+          <td class="num"><span class="log-total-view" data-log-total-idx="${idx}" title="Click to edit this receipt's total">${fmt(e.total)}</span></td>
           <td class="num due">${fmt(e.bal)}</td>
           <td>${proofCell}</td>
         </tr>`;
@@ -1554,6 +1582,23 @@
   }
 
   $('logWrap').addEventListener('click', function(e){
+    const totalSpan = e.target.closest('.log-total-view');
+    if(totalSpan){
+      const idx = Number(totalSpan.dataset.logTotalIdx);
+      const entry = receiptLog[idx];
+      if(!entry) return;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.01';
+      input.min = '0';
+      input.className = 'log-total-edit';
+      input.dataset.logTotalIdx = String(idx);
+      input.value = entry.total;
+      totalSpan.replaceWith(input);
+      input.focus();
+      input.select();
+      return;
+    }
     const btn = e.target.closest('.log-proof-btn');
     if(!btn) return;
     const idx = Number(btn.dataset.logIdx);
@@ -1566,6 +1611,19 @@
     } else {
       win.location.href = entry.proof.dataUrl;
     }
+  });
+
+  $('logWrap').addEventListener('focusout', function(e){
+    const input = e.target.closest('.log-total-edit');
+    if(!input) return;
+    commitLogTotalEdit(Number(input.dataset.logTotalIdx), input.value);
+  });
+
+  $('logWrap').addEventListener('keydown', function(e){
+    const input = e.target.closest('.log-total-edit');
+    if(!input) return;
+    if(e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+    else if(e.key === 'Escape'){ e.preventDefault(); renderLog(); }
   });
 
   $('logToggle').addEventListener('click', function(){
