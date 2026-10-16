@@ -244,13 +244,19 @@
     align-items:center;
     margin-bottom:8px;
   }
-  .dpitem-row input{
+  .dpitem-row input, .dpitem-row select{
     padding:8px 9px;
     font-size:12.5px;
   }
   .dpitem-row input.dpi-price, .dpitem-row input.dpi-qty{
     font-family:'JetBrains Mono',monospace;
     text-align:right;
+  }
+  .dpi-name-wrap{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    min-width:0;
   }
   .dpitem-remove{
     background:transparent;
@@ -711,6 +717,13 @@
           <input type="checkbox" id="fNeedsOR">
           <span>Needs OR &mdash; show BIR info &amp; QR on receipt</span>
         </label>
+
+        <div id="discountSection">
+          <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel); margin-bottom:7px;">Discount (optional)</label>
+          <div id="discountList"></div>
+          <button type="button" class="dpitem-addbtn" id="discountAddBtn">+ Add discount</button>
+        </div>
+
         <div class="field" id="grandTotalField">
           <label style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);">Grand Total <span style="color:var(--frost-dim); text-transform:none; letter-spacing:0;">(auto-sums from items — edit to override)</span></label>
           <input type="number" id="fGrandTotal" step="0.01" min="0">
@@ -901,9 +914,24 @@
   ];
   let prevDpNextId = 1;
   let prevDpRecords = [];
+  let discountNextId = 1;
+  let discountRecords = [];
   let grandTotalOverride = null; // null = auto-sum from items; number = user override
+  let activePendingNo = null; // set while a pending invoice is loaded into the form for payment
 
   const MOCKUP_FEE = 560;
+
+  const PRODUCT_LIST = [
+    'FROSTLINE Singlet',
+    'FROSTLINE Tshirt',
+    'FROSTLINE Warmer',
+    'FROSTLINE Cyclings',
+    'FROSTLINE Polo Shirt',
+    'FROSTLINE Chinese Collar',
+    'FROSTLINE Midriff',
+    'FROSTLINE Speedsuit'
+  ];
+  const CUSTOM_ITEM_VALUE = '__custom__';
 
   function computeDpTotals(){
     const isFull = currentType === 'full';
@@ -913,7 +941,8 @@
     const itemsTotal = items.reduce((s,it)=> s + it.price*it.qty, 0);
     const feeApplies = $('fMockupFee').checked;
     const fee = feeApplies ? MOCKUP_FEE : 0;
-    const autoGrandTotal = itemsTotal + fee;
+    const discountTotal = discountRecords.reduce((s,r)=> s + (parseFloat(r.amount) || 0), 0);
+    const autoGrandTotal = Math.max(itemsTotal + fee - discountTotal, 0);
     const grandTotal = grandTotalOverride !== null ? grandTotalOverride : autoGrandTotal;
     const dpAmount = isFull ? grandTotal : grandTotal * (pct/100);
     const prevDpList = isFull
@@ -929,7 +958,7 @@
     const hasPrevDp = isFull && prevDpAmount > 0;
     const finalPaymentAmount = hasPrevDp ? Math.max(grandTotal - prevDpAmount, 0) : dpAmount;
     const isOverridden = grandTotalOverride !== null;
-    return { items, itemsTotal, totalQty, feeApplies, fee, autoGrandTotal, grandTotal, isOverridden, dpAmount, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount };
+    return { items, itemsTotal, totalQty, feeApplies, fee, discountTotal, autoGrandTotal, grandTotal, isOverridden, dpAmount, dpPct: pct, isFull, prevDpList, prevDpAmount, hasPrevDp, finalPaymentAmount };
   }
 
   function renderPrevDpForm(){
@@ -941,18 +970,40 @@
       </div>`).join('');
   }
 
-  function renderDpItemsForm(){
-    $('dpItemsList').innerHTML = dpItems.map(it => `
-      <div class="dpitem-row">
-        <input type="text" class="dpi-name" data-field="name" data-id="${it.id}" placeholder="Item name (e.g. Singlet)" value="${(it.name||'').replace(/"/g,'&quot;')}">
-        <input type="number" class="dpi-price" data-field="price" data-id="${it.id}" placeholder="Per pc" step="0.01" min="0" value="${it.price || ''}">
-        <input type="number" class="dpi-qty" data-field="qty" data-id="${it.id}" placeholder="Qty" step="1" min="0" value="${it.qty || ''}">
-        <button type="button" class="dpitem-remove" data-remove="${it.id}" title="Remove item">&times;</button>
+  function renderDiscountForm(){
+    $('discountList').innerHTML = discountRecords.map(r => `
+      <div class="prevdp-row">
+        <input type="text" class="discount-label" data-field="label" data-id="${r.id}" placeholder="Reason (optional)" value="${(r.label||'').replace(/"/g,'&quot;')}">
+        <input type="number" class="prevdp-amount" data-field="amount" data-id="${r.id}" placeholder="0.00" step="0.01" min="0" value="${r.amount || ''}">
+        <button type="button" class="dpitem-remove" data-discount-remove="${r.id}" title="Remove discount">&times;</button>
       </div>`).join('');
   }
 
+  function renderDpItemsForm(){
+    $('dpItemsList').innerHTML = dpItems.map(it => {
+      const isPreset = PRODUCT_LIST.includes(it.name);
+      const isCustom = !!it._customMode || (!!it.name && !isPreset);
+      const selectVal = isCustom ? CUSTOM_ITEM_VALUE : (isPreset ? it.name : '');
+      const options = [
+        `<option value="" ${selectVal === '' ? 'selected' : ''} disabled>Select item…</option>`,
+        ...PRODUCT_LIST.map(p => `<option value="${p}" ${selectVal === p ? 'selected' : ''}>${p}</option>`),
+        `<option value="${CUSTOM_ITEM_VALUE}" ${isCustom ? 'selected' : ''}>(custom)</option>`
+      ].join('');
+      return `
+      <div class="dpitem-row">
+        <div class="dpi-name-wrap">
+          <select class="dpi-name-select" data-field="nameSelect" data-id="${it.id}">${options}</select>
+          <input type="text" class="dpi-name-custom" data-field="name" data-id="${it.id}" placeholder="Custom item name" value="${(it.name||'').replace(/"/g,'&quot;')}" style="${isCustom ? '' : 'display:none;'}">
+        </div>
+        <input type="number" class="dpi-price" data-field="price" data-id="${it.id}" placeholder="Per pc" step="0.01" min="0" value="${it.price || ''}">
+        <input type="number" class="dpi-qty" data-field="qty" data-id="${it.id}" placeholder="Qty" step="1" min="0" value="${it.qty || ''}">
+        <button type="button" class="dpitem-remove" data-remove="${it.id}" title="Remove item">&times;</button>
+      </div>`;
+    }).join('');
+  }
+
   function renderDpTablePreview(){
-    const { items, itemsTotal, feeApplies, fee, grandTotal, isOverridden, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount } = computeDpTotals();
+    const { items, itemsTotal, feeApplies, fee, discountTotal, grandTotal, isOverridden, dpAmount, dpPct, totalQty, isFull, hasPrevDp, prevDpList, prevDpAmount, finalPaymentAmount } = computeDpTotals();
     const activeItems = items.filter(it => it.name || it.price || it.qty);
     const list = activeItems.length ? activeItems : items;
     const balance = Math.max(grandTotal - dpAmount, 0);
@@ -971,6 +1022,10 @@
 
     const feeLine = feeApplies
       ? `<div class="dp-item-line"><span class="lbl">Design/Template/Mockup Fee</span><span class="val">${fmt(fee)}</span></div>`
+      : '';
+
+    const discountLine = discountTotal > 0
+      ? `<div class="dp-item-line"><span class="lbl">Discount</span><span class="val">&minus;${fmt(discountTotal)}</span></div>`
       : '';
 
     let paidLineLabel, paidLineAmount;
@@ -995,7 +1050,7 @@
       : '';
 
     $('dpTablePreview').innerHTML = `
-      <div class="dp-lines">${itemLines}${feeLine}</div>
+      <div class="dp-lines">${itemLines}${feeLine}${discountLine}</div>
       <div class="aline"><span>Grand total${isOverridden ? ' (adjusted)' : ''}</span><span class="val">${fmt(grandTotal)}</span></div>
       ${breakdownBlock}
       <div class="aline total"><span>${paidLineLabel}</span><span class="val">${fmt(paidLineAmount)}</span></div>
@@ -1032,6 +1087,11 @@
     if(birBlock) birBlock.style.display = $('fNeedsOR').checked ? '' : 'none';
   }
 
+  function syncModeSelect(){
+    const sel = $('modeSelect');
+    if(sel) sel.value = docCategory + '_' + currentType;
+  }
+
   function setDoc(doc){
     docCategory = doc;
     document.querySelectorAll('#docToggle button').forEach(b=>{
@@ -1039,6 +1099,7 @@
     });
     const submitBtn = $('submitBtn');
     if(submitBtn) submitBtn.textContent = doc === 'invoice' ? 'Save Pending Invoice' : 'Generate Receipt';
+    syncModeSelect();
     updateFieldVisibility();
     updatePreview();
   }
@@ -1051,6 +1112,7 @@
     const t = typeLabels[type];
     $('lblName').textContent = t.name;
     $('lblIssuer').textContent = t.issuer;
+    syncModeSelect();
     updateFieldVisibility();
 
     $('dpPctRow').style.display = type === 'downpayment' ? '' : 'none';
@@ -1142,6 +1204,35 @@
     updatePreview();
   });
 
+  $('discountAddBtn').addEventListener('click', function(){
+    discountRecords.push({ id: discountNextId++, label: '', amount: 0 });
+    renderDiscountForm();
+    grandTotalOverride = null;
+    updatePreview();
+  });
+
+  $('discountList').addEventListener('input', function(e){
+    const t = e.target;
+    if(!t.dataset || !t.dataset.field) return;
+    const id = Number(t.dataset.id);
+    const record = discountRecords.find(r => r.id === id);
+    if(!record) return;
+    if(t.dataset.field === 'label') record.label = t.value;
+    else record[t.dataset.field] = parseFloat(t.value) || 0;
+    grandTotalOverride = null;
+    updatePreview();
+  });
+
+  $('discountList').addEventListener('click', function(e){
+    const removeId = e.target.dataset ? e.target.dataset.discountRemove : null;
+    if(!removeId) return;
+    const id = Number(removeId);
+    discountRecords = discountRecords.filter(r => r.id !== id);
+    renderDiscountForm();
+    grandTotalOverride = null;
+    updatePreview();
+  });
+
   $('dpItemsList').addEventListener('input', function(e){
     const t = e.target;
     if(!t.dataset || !t.dataset.field) return;
@@ -1152,6 +1243,28 @@
     else item[t.dataset.field] = parseFloat(t.value) || 0;
     grandTotalOverride = null; // items changed — go back to auto-sum
     updatePreview();
+  });
+
+  $('dpItemsList').addEventListener('change', function(e){
+    const t = e.target;
+    if(!t.dataset || t.dataset.field !== 'nameSelect') return;
+    const id = Number(t.dataset.id);
+    const item = dpItems.find(i => i.id === id);
+    if(!item) return;
+    if(t.value === CUSTOM_ITEM_VALUE){
+      item._customMode = true;
+      item.name = '';
+    } else {
+      item._customMode = false;
+      item.name = t.value;
+    }
+    grandTotalOverride = null;
+    renderDpItemsForm();
+    updatePreview();
+    if(item._customMode){
+      const input = document.querySelector(`.dpi-name-custom[data-id="${id}"]`);
+      if(input) input.focus();
+    }
   });
 
   $('dpItemsList').addEventListener('click', function(e){
@@ -1180,13 +1293,16 @@
     lines.push($('rNameLbl').textContent + ': ' + $('rName').textContent);
     lines.push('Method: ' + $('rMethod').textContent);
     lines.push('');
-    const { items, feeApplies, fee, grandTotal, isOverridden, dpAmount, dpPct, isFull, hasPrevDp, prevDpList, finalPaymentAmount } = computeDpTotals();
+    const { items, feeApplies, fee, grandTotal, isOverridden, dpAmount, dpPct, isFull, hasPrevDp, prevDpList, finalPaymentAmount, discountTotal } = computeDpTotals();
     items.forEach(it=>{
       if(!it.name && !it.price && !it.qty) return;
       lines.push(`${it.name || 'Item'} — ${it.qty} pc(s) x ${fmt(it.price)} = ${fmt(it.price*it.qty)}`);
     });
     if(feeApplies){
       lines.push('Design/Template/Mockup Fee: ' + fmt(fee));
+    }
+    if(discountTotal > 0){
+      lines.push('Discount: -' + fmt(discountTotal));
     }
     lines.push('');
     lines.push(`Grand Total${isOverridden ? ' (adjusted)' : ''}: ` + fmt(grandTotal));
@@ -1318,9 +1434,11 @@
     dpItems = (p.items && p.items.length ? p.items : [{name:'',price:0,qty:0},{name:'',price:0,qty:0}])
       .map(it => ({ id: dpNextId++, name: it.name || '', price: it.price || 0, qty: it.qty || 0 }));
     prevDpRecords = (p.prevDp || []).map(r => ({ id: prevDpNextId++, amount: r.amount || 0, date: r.date || '' }));
+    discountRecords = (p.discount || []).map(r => ({ id: discountNextId++, label: r.label || '', amount: r.amount || 0 }));
     grandTotalOverride = (typeof p.grandTotalOverride === 'number') ? p.grandTotalOverride : null;
     renderDpItemsForm();
     renderPrevDpForm();
+    renderDiscountForm();
 
     currentType = p.type === 'full' ? 'full' : 'downpayment';
     docCategory = 'receipt';
@@ -1330,6 +1448,7 @@
     document.querySelectorAll('#docToggle button').forEach(b=>{
       b.classList.toggle('active', b.dataset.doc === 'receipt');
     });
+    syncModeSelect();
     const t = typeLabels[currentType];
     $('lblName').textContent = t.name;
     $('lblIssuer').textContent = t.issuer;
@@ -1345,12 +1464,14 @@
     if(idx === -1) return;
     const p = pendingInvoices[idx];
     restorePendingIntoForm(p);
+    // Load the invoice into the form for review — don't commit yet. The
+    // user can switch Mode (e.g. Downpayment → Full Payment), add a
+    // discount, etc. before clicking "Generate Receipt" to finalize it.
+    activePendingNo = p.no;
     manualNo = p.no; // reuse the invoice's own number for the matching receipt
-    commitToHistory(false);
-    manualNo = null;
-    pendingInvoices.splice(idx, 1);
-    renderPending();
-    deleteRemotePending(p.no);
+    updatePreview();
+    const formEl = $('rform');
+    if(formEl && formEl.scrollIntoView) formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function deletePending(no){
@@ -1519,6 +1640,7 @@
       mockupFee: $('fMockupFee').checked,
       dpPct: parseFloat($('fDpPct').value) || 0,
       prevDp: prevDpRecords.map(r => ({ amount: r.amount || 0, date: r.date || '' })),
+      discount: discountRecords.map(r => ({ label: r.label || '', amount: r.amount || 0 })),
       grandTotalOverride: grandTotalOverride,
       needsOR: $('fNeedsOR').checked,
       amountDue: amountDueNow,
@@ -1538,6 +1660,17 @@
     e.preventDefault();
     if(docCategory === 'invoice'){
       savePendingInvoice();
+    } else if(activePendingNo){
+      // Finalizing a receipt generated from a pending invoice: reuse its
+      // number (already set as manualNo), don't burn a new counter value,
+      // then remove it from Pending now that it's been paid.
+      const no = activePendingNo;
+      commitToHistory(false);
+      manualNo = null;
+      activePendingNo = null;
+      const idx = pendingInvoices.findIndex(p => p.no === no);
+      if(idx !== -1){ pendingInvoices.splice(idx, 1); renderPending(); }
+      deleteRemotePending(no);
     } else {
       commitToHistory(true);
     }
@@ -1560,6 +1693,13 @@
     grandTotalOverride = null;
     prevDpRecords = [];
     renderPrevDpForm();
+    discountRecords = [];
+    discountNextId = 1;
+    renderDiscountForm();
+    activePendingNo = null;
+    manualNo = null;
+    const submitBtn = $('submitBtn');
+    if(submitBtn) submitBtn.textContent = docCategory === 'invoice' ? 'Save Pending Invoice' : 'Generate Receipt';
     updatePreview();
   });
 
@@ -1645,6 +1785,7 @@
 
   $('fDate').value = todayStr();
   renderDpItemsForm();
+  renderDiscountForm();
   setType('downpayment');
   loadRemoteLog();
   loadRemotePending();
