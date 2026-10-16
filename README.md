@@ -33,13 +33,21 @@ functions give it real, shared persistence: `api/log.js` for History,
     invoice (customer, items, DP %, fees, etc.) in the **Pending Invoices**
     panel instead of logging it as a completed transaction — it's unpaid.
   - When the client actually pays, click **Mark Paid** on that row. It
-    reloads all the invoice's details into the form, switches it to the
-    matching document — a **Downpayment Receipt** or a **Full Payment
-    Receipt**, whichever the invoice was for — reuses the same reference
-    number, and logs it straight into **History**. The pending row is
-    then removed.
+    reloads all the invoice's details into the form — as a **Receipt**,
+    reusing the same reference number — for review, *without* committing
+    it yet. From there you can still switch Downpayment ↔ Full Payment
+    (or back to Invoice), add a discount, adjust previous-downpayment
+    records, etc. Click **Generate Receipt** to finalize: it logs into
+    **History** and the row is removed from Pending. Abandoning the
+    review (Clear Fields) leaves the pending invoice untouched.
+  - **Discount (optional)** — add one or more label + amount rows (same
+    pattern as Previous Downpayment Records) to reduce the Grand Total.
+    Carries over when a pending invoice with a discount is marked paid.
   - **History** (formerly "Receipt Log") lists every completed receipt —
-    number, customer, date, total, and balance — exportable as CSV.
+    number, customer, date, total, and balance — exportable as CSV. A
+    logged receipt's **Total** can still be corrected afterward: click
+    the value to edit it inline (Enter to save, Esc to cancel); Balance
+    recalculates automatically.
   - Both panels are backed by Upstash Redis so entries persist and are
     shared across devices, not just the browser tab that created them.
 
