@@ -232,6 +232,13 @@
     margin-top:10px;
   }
   .secbtn:hover{border-color:var(--ice); color:var(--ice);}
+  .clearformhint{
+    font-size:10.5px;
+    color:var(--steel);
+    text-align:center;
+    margin-top:8px;
+    line-height:1.5;
+  }
 
   /* ---------- right column ---------- */
   .rightcol{display:flex; flex-direction:column; gap:22px;}
@@ -789,6 +796,7 @@
 
       <button type="submit" class="genbtn" id="submitBtn">Generate Receipt</button>
       <button type="button" class="secbtn" id="clearForm">Clear Fields</button>
+      <div class="clearformhint">Clearing only resets this form — saved Pending Invoices and History records are not affected and will still be there.</div>
     </form>
   </div>
 
